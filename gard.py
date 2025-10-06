@@ -2,6 +2,7 @@ import os
 import time
 
 import numpy as np
+import pandas as pd
 
 from utils import set_seed, parse_args
 
@@ -82,6 +83,11 @@ if __name__ == "__main__":
     args = parse_args()
     set_seed(args.seed)
     file_name = os.path.join("output", ".".join([str(args.seed), "txt"]))
+    if os.path.exists(file_name):
+        temp_data = pd.read_csv(file_name)
+        if len(temp_data) >= args.n_gen:
+            print(file_name)
+            exit()
     with open(file_name, "w") as file:
         file.write(";".join(["i", "elapsed.sec", "n"]) + "\n")
 
