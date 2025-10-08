@@ -1,9 +1,9 @@
 import argparse
-import importlib
 import random
 
 import numpy as np
-from autodiscjax.modules.grnwrappers import GRNRollout
+
+MEASURES = ["synergy", "causation", "redundancy", "integrated", "emergence"]
 
 
 def parse_args():

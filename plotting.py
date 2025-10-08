@@ -5,12 +5,17 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from utils import MEASURES
+
 
 def load_data(directory="output"):
     data = None
     for file in os.listdir(directory):
         if file.endswith("txt"):
-            d = pd.read_csv(os.path.join(directory, file), sep=";")
+            try:
+                d = pd.read_csv(os.path.join(directory, file), sep=";")
+            except pd.errors.EmptyDataError:
+                continue
             d["seed"] = int(file.split(".")[0])
             if data is None:
                 data = d.copy()
@@ -76,9 +81,27 @@ def carpet_plot(data, x, y):
     plt.close()
 
 
+def plot_info():
+    df = pd.read_csv("info.txt", sep=";")
+    fig, axes = plt.subplots(figsize=(8, 5 * len(MEASURES)), nrows=len(MEASURES), ncols=1)
+    for ax, measure in zip(axes, MEASURES):
+        data = np.array(df[measure].str.split('/', expand=True), dtype=float).T
+        data = np.random.random(size=data.shape)
+        median = np.median(data, axis=0)
+        ax.plot(median)
+        err = np.std(data, axis=0)
+        ax.fill_between(np.arange(len(median)), median - err, median + err, alpha=0.25)
+        ax.set_title(measure, fontsize=15)
+        ax.set_xlabel("simulation time", fontsize=10)
+        ax.set_ylabel("nats", fontsize=10)
+    plt.savefig("figures/info.png")
+    plt.close()
+
+
 if __name__ == "__main__":
-    d = load_data()
-    d = d[d["i"] < 200]
-    carpet_plot(data=d,
-                x=0,
-                y=1)
+    # d = load_data()
+    # d = d[d["i"] < 200]
+    # carpet_plot(data=d,
+    #             x=0,
+    #             y=1)
+    plot_info()

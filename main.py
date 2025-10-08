@@ -3,10 +3,7 @@ import numpy as np
 from information import mutual_information_matrix, minimum_information_bipartition, local_phi_id, local_phi_r, \
     corrected_zscore, global_signal_regression, remove_autocorrelation
 from plotting import load_data
-from utils import set_seed, parse_args
-
-
-MEASURES = ["synergy", "causation", "redundancy", "integrated", "emergence"]
+from utils import set_seed, parse_args, MEASURES
 
 
 def preprocess_data(data):
