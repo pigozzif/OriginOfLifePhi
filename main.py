@@ -42,6 +42,8 @@ if __name__ == "__main__":
 
     df = load_data()
     for (seed,), traj in df.groupby(["seed"]):
+        if len(traj) < 5000:
+            continue
         composomes = np.array(traj["n"].str.split('/', expand=True), dtype=float).T
         composomes = preprocess_data(data=composomes)
         information = compute_sim_info(data=composomes)
