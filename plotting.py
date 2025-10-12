@@ -85,7 +85,7 @@ def plot_info():
     df = pd.read_csv("info.txt", sep=";")
     fig, axes = plt.subplots(figsize=(8, 5 * len(MEASURES)), nrows=len(MEASURES), ncols=1)
     for ax, measure in zip(axes, MEASURES):
-        data = np.array(df[measure].str.split('/', expand=True), dtype=float).T
+        data = np.array(df[measure].str.split('/', expand=True), dtype=float)
         median = np.median(data, axis=0)
         ax.plot(median)
         err = np.std(data, axis=0)
