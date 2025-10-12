@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.ndimage import uniform_filter1d
 
 from utils import MEASURES
 
@@ -86,6 +87,7 @@ def plot_info():
     fig, axes = plt.subplots(figsize=(8, 5 * len(MEASURES)), nrows=len(MEASURES), ncols=1)
     for ax, measure in zip(axes, MEASURES):
         data = np.array(df[measure].str.split('/', expand=True), dtype=float)
+        data = uniform_filter1d(data, size=100)
         median = np.median(data, axis=0)
         ax.plot(median)
         err = np.std(data, axis=0)
