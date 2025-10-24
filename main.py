@@ -1,16 +1,15 @@
+import networkx.exception
 import numpy as np
 
-from information import mutual_information_matrix, minimum_information_bipartition, local_phi_id, local_phi_r, \
-    corrected_zscore, global_signal_regression, remove_autocorrelation
+from information import mutual_information_matrix, minimum_information_bipartition, local_phi_id, local_phi_r
 from plotting import load_data
 from utils import set_seed, parse_args, MEASURES
 
 
 def preprocess_data(data):
-    data = corrected_zscore(data, axis=1)
-    data = global_signal_regression(data)
-    data = remove_autocorrelation(data)
-    return data
+    gmean = np.exp(np.mean(np.log(data + 1e-12), axis=0, keepdims=True))
+    data = np.log((data + 1e-12) / gmean)
+    return data[:-1, :]
 
 
 def compute_sim_info(data):
@@ -39,11 +38,18 @@ if __name__ == "__main__":
 
     df = load_data()
     for (seed,), traj in df.groupby(["seed"]):
-        if len(traj) < 5000:
-            continue
-        composomes = np.array(traj["n"].str.split('/', expand=True), dtype=float).T
+        print(seed)
+        # if len(traj) < 5000:
+        #     continue
+        # if seed >= 59:
+        #     continue
+        traj = traj[traj["is_parent"]]
+        composomes = np.stack(traj["n"].to_numpy()).T
         composomes = preprocess_data(data=composomes)
-        information = compute_sim_info(data=composomes)
+        try:
+            information = compute_sim_info(data=composomes)
+        except networkx.exception.NetworkXError:
+            continue
 
         vals = [str(seed)]
         for measure in MEASURES:

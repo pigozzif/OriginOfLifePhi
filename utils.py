@@ -9,7 +9,7 @@ MEASURES = ["synergy", "causation", "redundancy", "integrated", "emergence"]
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--n_gen", type=int, default=5000)
+    parser.add_argument("--n_gen", type=int, default=100)
     return parser.parse_args()
 
 
