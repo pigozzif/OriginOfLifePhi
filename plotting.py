@@ -214,6 +214,14 @@ def plot_diagnostics(data, n=1000, exp_name="figures"):
     plt.close()
 
 
+def plot_sweep(sigmas, As, ratios):
+    for ratio in ratios:
+        fig, axes = plt.subplots(figsize=(8 * len(sigmas), 5 * len(As)), nrows=len(sigmas), ncols=len(As))
+        for row, sigma in enumerate(sigmas):
+            for col, A in enumerate(As):
+                axes[row][col].imshow()
+
+
 if __name__ == "__main__":
     d = load_data()
     # d = d[d["i"] < 500]
