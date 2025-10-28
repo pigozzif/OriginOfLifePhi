@@ -2,13 +2,12 @@ import os
 import time
 
 import numpy as np
-import pandas as pd
+from matplotlib import pyplot as plt
 
 from utils import set_seed, parse_args
 
 
 def seed_population(ng, ntot, nmin):
-    # Construct the environmental pool
     # Each molecule type is repeated nTOT times
     pool = np.repeat(np.arange(ng), ntot)
     # Randomly select Nmin molecules from the pool (without replacement)
@@ -20,7 +19,6 @@ def seed_population(ng, ntot, nmin):
 def gard_generation(
         n,
         beta,
-        NG,
         Nmax,
         kf,
         kb,
@@ -28,44 +26,6 @@ def gard_generation(
         dt=0.05,
         max_steps=10_000
 ):
-    # """Run one growth cycle until Nmax, then fission into Nmax/2 daughters."""
-    # while n.sum() < Nmax:
-    #     n_molecules = n.sum()
-    #     second_terms = np.array([(1 + np.sum(beta[i, :] * n / max(n_molecules, 1))) for i in range(NG)])
-    # calculate propensities
-    #     join_rates = np.array([
-    #         (kf * rho[i] * n_molecules) * second_terms[i] for i in range(NG)
-    #     ])
-    #     leave_rates = np.array([
-    #         (kb * n[i]) * second_terms[i] for i in range(NG)
-    #     ])
-
-    #     a = np.concatenate([join_rates, leave_rates])
-    #     a0 = np.sum(a)
-    #     if a0 <= 0:
-    #         break
-
-    # Gillespie steps
-    #     r1, r2 = np.random.uniform(), np.random.uniform()
-    #     tau = (1.0 / a0) * np.log(1.0 / r1)
-
-    #     reaction_index = np.searchsorted(np.cumsum(a), r2 * a0)
-    #     if reaction_index < NG:
-    #         n[reaction_index] += 1
-    #     else:
-    #         j = reaction_index - NG
-    #         if n[j] > 0:
-    #             n[j] -= 1
-
-    # fission: random split into 2 daughters of Nmax/2 each
-    # daughter = np.zeros_like(n)
-    # indices = np.repeat(np.arange(NG), n)  # expanded composition
-    # np.random.shuffle(indices)
-    # selected = indices[:Nmax // 2]  # one daughter chosen
-    # for idx in selected:
-    #     daughter[idx] += 1
-
-    # return daughter
     """
         One GARD growth cycle using Poisson-process dynamics
         (after Segrè et al. 2000, Eq. 4), until reaching Nmax molecules,
@@ -96,11 +56,15 @@ def gard_generation(
         if n_mol >= Nmax or n_mol == 0:
             break
         # kinetic flux for each molecule type
-        flux = (kf * rho * n_mol - kb * n) * (1.0 + (beta @ n) / max(n_mol, 1))
+        frac = n / max(n_mol, 1)
+        # flux = (kf * rho * n_mol - kb * n) * (1.0 + beta @ frac)
+        # flux = (kf * (beta @ n)) - (kb * n)
         # stochastic update (Poisson sampling)
-        dn = np.random.poisson(flux * dt)
+        join = np.random.poisson((kf * rho * n_mol) * (1 + beta.dot(frac)) * dt)
+        leave = np.random.poisson((kb * n) * (1 + beta.dot(frac)) * dt)
+        n = np.clip(n + join - leave, 0, None)
         # Apply updates, allowing both positive and negative fluxes
-        n = np.clip(n + dn, 0, None)
+        n = np.clip(n + join - leave, 0, None)
         ns.append(n)
 
     # ----- fission -----
@@ -110,28 +74,36 @@ def gard_generation(
 
 
 def gard_multigenerational(
-        generations=10,
+        generations,
         NG=100,
-        Nmax=80,
+        Nmax=100,
         kf=1e-2,
-        kb=1e-5,
-        A=-4.0,
-        sigma=4.0
+        kb=1e-3,
+        A=-4,
+        sigma=4
 ):
     rho = np.ones(NG) / NG
 
     # catalytic matrix
+    # log10_beta = np.random.normal(loc=A, scale=sigma, size=(NG, NG))
+    # beta = 10 ** log10_beta
     beta = np.random.lognormal(mean=A, sigma=sigma, size=(NG, NG))
+    # print(np.percentile(np.log10(beta), [1, 50, 99, 99.9]))
+
+    # plt.imshow(beta, cmap='magma')
+    # plt.colorbar(label='log10 β')
+    # vals = beta.flatten()
+    # plt.hist(vals, bins=100)
+    # plt.show()
+    # exit()
 
     # initial seed assembly
-    # n = np.zeros(NG, dtype=int)
-    # n[np.random.randint(0, NG)] = 1
     n = seed_population(ng=NG,
                         ntot=1000,
                         nmin=Nmax // 2)
 
     for gen in range(generations):
-        n, ns = gard_generation(n, beta, NG, Nmax, kf, kb, rho)
+        n, ns = gard_generation(n, beta, Nmax, kf, kb, rho)
         yield gen, n.copy(), ns
 
 
@@ -148,7 +120,11 @@ if __name__ == "__main__":
         file.write(";".join(["i", "step", "is_parent", "is_daughter", "elapsed.sec", "n"]) + "\n")
 
     s = time.time()
-    for g, d, comps in gard_multigenerational(generations=args.n_gen):
+    for g, d, comps in gard_multigenerational(generations=args.n_gen,
+                                              kf=args.kf,
+                                              kb=args.kb,
+                                              A=args.A,
+                                              sigma=args.sigma):
         for i, comp in enumerate(comps):
             with open(file_name, "a") as file:
                 file.write(";".join([str(g),
