@@ -20,14 +20,14 @@ def load_data(directory="output"):
     for file in os.listdir(directory):
         if file.endswith("txt"):
             try:
-                d = pd.read_csv(os.path.join(directory, file), sep=";")
+                curr_d = pd.read_csv(os.path.join(directory, file), sep=";")
             except pd.errors.EmptyDataError:
                 continue
-            d["seed"] = int(file.split(".")[0])
+            curr_d["seed"] = int(file.split(".")[0])
             if data is None:
-                data = d.copy()
+                data = curr_d.copy()
             else:
-                data = pd.concat([data, d], axis=0)
+                data = pd.concat([data, curr_d], axis=0)
     data["n"] = data.apply(lambda row: np.array([int(c) for c in row["n"].split("/")]), axis=1)
     data["n"] = data.apply(lambda row: row["n"] / row["n"].sum(), axis=1)
     return data
