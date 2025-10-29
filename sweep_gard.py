@@ -15,7 +15,7 @@ if __name__ == "__main__":
                                      str(ratio).replace(".", ",")])
                 kb = 1e-5
                 kf = kb * ratio
-                for seed in range(1):
+                for seed in range(100):
                     os.system(f"python gard.py --seed={seed} --n_gen=1000 --kf={kf} --kb={kb} --A={-A} --sigma={sigma}")
                     print(seed)
                 os.makedirs(f"figures/{exp_name}", exist_ok=True)
