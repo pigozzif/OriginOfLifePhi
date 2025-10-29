@@ -24,7 +24,7 @@ def gard_generation(
         kb,
         rho,
         dt=0.05,
-        max_steps=10_000
+        max_steps=1_000
 ):
     """
         One GARD growth cycle using Poisson-process dynamics
