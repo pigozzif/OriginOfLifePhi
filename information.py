@@ -32,6 +32,17 @@ def corrected_zscore(data, axis=1, noise=10 ** -6):
     return data
 
 
+def preprocess_data(data, eps=1e-8):
+    # data = zscore(data, axis=1)
+    # data = remove_autocorrelation(data)
+    # return data
+    # data = data + np.random.normal(0, eps, data.shape)
+    # return data / np.maximum(data.sum(axis=0, keepdims=True), 1)
+    gmean = np.exp(np.mean(np.log(data + 1e-12), axis=0, keepdims=True))
+    data = np.log((data + 1e-12) / gmean)
+    return data[:-1, :]
+
+
 def local_entropy_1d(idx1, x):
     mu = x[idx1].mean()  # Central tendency
     sigma = x[idx1].std()  # Standard deviation
@@ -40,16 +51,17 @@ def local_entropy_1d(idx1, x):
     return entropy
 
 
-def local_entropy_nd(x):
+def local_entropy_nd(x, eps=1e-6):
     # It gets grumpy if it's a 2D y with only one row
     # so in that case, we kick it to local_entropy_1d.
     if x.shape[0] == 1:
         return local_entropy_1d(0, x)
     else:
         cov = np.cov(x, ddof=0)  # The covariance matrix.
+        # cov += np.eye(cov.shape[0]) * eps
         means = x.mean(axis=-1)  # The central tendencies
         # Magic call to scipy.
-        entropy = -np.log(multivariate_normal.pdf(x.T, mean=means, cov=cov))
+        entropy = -np.log(multivariate_normal.pdf(x.T, mean=means, cov=cov, allow_singular=True))
     return entropy
 
 
