@@ -80,6 +80,7 @@ class GardEnv(gymnasium.Env):
         super().reset(seed=seed)
         self.i = 0
         self.t = 0
+        self.ns.clear()
         self.ns = [n for n in self.seed_data]
         self.n = self.ns[-1]
         return self._get_obs(), {}
