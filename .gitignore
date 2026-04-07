@@ -8,3 +8,6 @@
 *.zip
 *.pickle
 *.npy
+*.mlx
+*.m
+*.mat
