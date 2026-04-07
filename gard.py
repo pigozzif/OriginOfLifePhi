@@ -16,9 +16,24 @@ def seed_population(ng, ntot, nmin):
     return np.bincount(selected, minlength=ng)
 
 
+def gard_step(n, Nmax, kf, kb, rho, beta, dt):
+    n_mol = n.sum()
+    if n_mol >= Nmax or n_mol == 0:
+        return n, False
+    # kinetic flux for each molecule type
+    frac = n / max(n_mol, 1)
+    # stochastic update (Poisson sampling)
+    join = np.random.poisson((kf * rho * n_mol) * (1 + beta.dot(frac)) * dt)
+    leave = np.random.poisson((kb * n) * (1 + beta.dot(frac)) * dt)
+    n = np.clip(n + join - leave, 0, None)
+    return n, True
+
+
 def gard_generation(
         n,
         beta,
+        NG,
+        ntot,
         Nmax,
         kf,
         kb,
@@ -52,33 +67,26 @@ def gard_generation(
         """
     ns = [n]
     for _ in range(max_steps):
-        n_mol = n.sum()
-        if n_mol >= Nmax or n_mol == 0:
+        n, ok = gard_step(n=n, Nmax=Nmax, kf=kf, kb=kb, rho=rho, beta=beta, dt=dt)
+        if not ok:
             break
-        # kinetic flux for each molecule type
-        frac = n / max(n_mol, 1)
-        # flux = (kf * rho * n_mol - kb * n) * (1.0 + beta @ frac)
-        # flux = (kf * (beta @ n)) - (kb * n)
-        # stochastic update (Poisson sampling)
-        join = np.random.poisson((kf * rho * n_mol) * (1 + beta.dot(frac)) * dt)
-        leave = np.random.poisson((kb * n) * (1 + beta.dot(frac)) * dt)
-        n = np.clip(n + join - leave, 0, None)
         # Apply updates, allowing both positive and negative fluxes
-        n = np.clip(n + join - leave, 0, None)
         ns.append(n)
 
     # ----- fission -----
-    daughter = np.random.binomial(n, 0.5)
+    daughter1 = np.random.binomial(n, 0.5)
+    daughter2 = n - daughter1
 
-    return daughter, ns
+    return daughter1 if np.random.rand() < 0.5 else daughter2, ns
 
 
 def gard_multigenerational(
         generations,
         NG=100,
-        Nmax=100,
-        kf=1e-2,
-        kb=1e-3,
+        ntot=1000,
+        Nmax=80,
+        kf=1e-3,
+        kb=1e-5,
         A=-4,
         sigma=4
 ):
@@ -99,11 +107,13 @@ def gard_multigenerational(
 
     # initial seed assembly
     n = seed_population(ng=NG,
-                        ntot=1000,
+                        ntot=ntot,
                         nmin=Nmax // 2)
+    print(np.sum(n))
+    exit()
 
     for gen in range(generations):
-        n, ns = gard_generation(n, beta, Nmax, kf, kb, rho)
+        n, ns = gard_generation(n, beta, NG, ntot, Nmax, kf, kb, rho)
         yield gen, n.copy(), ns
 
 
@@ -116,8 +126,8 @@ if __name__ == "__main__":
     #     if len(temp_data) >= args.n_gen:
     #         print(file_name)
     #         exit()
-    with open(file_name, "w") as file:
-        file.write(";".join(["i", "step", "is_parent", "is_daughter", "elapsed.sec", "n"]) + "\n")
+    # with open(file_name, "w") as file:
+    #     file.write(";".join(["i", "step", "is_parent", "is_daughter", "elapsed.sec", "n"]) + "\n")
 
     s = time.time()
     for g, d, comps in gard_multigenerational(generations=args.n_gen,
