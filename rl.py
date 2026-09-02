@@ -1,14 +1,16 @@
-import copy
 import os
+import time
+from multiprocessing import Pool
 
 import gymnasium
 import numpy as np
 from gymnasium.vector.utils import spaces
+from scipy.io import savemat, loadmat
 
+from gard import gard_generation
 from information import preprocess_data
 from main import compute_sim_info
-from plotting import load_all_mat_data
-from utils import parse_args
+from utils import parse_args, set_seed, NMAX
 
 
 class GardEnv(gymnasium.Env):
@@ -18,12 +20,12 @@ class GardEnv(gymnasium.Env):
                  p,
                  NG=100,
                  ntot=1000,
-                 Nmax=80,
                  kf=1e-3,
                  kb=1e-5,
                  A=-4,
                  sigma=4,
-                 max_steps=1000):
+                 Nmax=NMAX,
+                 max_steps=100):
         super().__init__()
         self.gen = generations
         self.NG = NG
@@ -37,11 +39,18 @@ class GardEnv(gymnasium.Env):
         # Replace obs_dim with your actual state dimension
         self.rho = np.ones(NG) / NG
         # catalytic matrix
-        self.beta = np.random.lognormal(mean=A, sigma=sigma, size=(NG, NG))
+        # self.beta = np.random.lognormal(mean=A, sigma=sigma, size=(NG, NG))
         # initial seed assembly
-        self.seed_data = load_all_mat_data(attribute="history")[seed]
-        self.seed_data = self.seed_data[:, :int(self.seed_data.shape[1] * p) + 2]
-        self.ns = [n for n in self.seed_data]
+        seed_data = loadmat(
+            os.path.join("GARD-model", "Matlab", "SourceCode", "Doron_Lancet_GARD_Next_generation", "GARD_v10", "data",
+                         f"GARD_run_seed_{seed + 1:03d}"))["o"]
+        # catalytic matrix
+        self.beta = seed_data["Beta"][0, 0]
+        # initial seed assembly
+        # self.seed_data = load_all_mat_data(attribute="history")[seed]
+        self.seed_data = seed_data["history"][0, 0]
+        self.seed_data = self.seed_data[:, :int(self.seed_data.shape[1] * p) + 3]
+        self.ns = [self.seed_data[:, i] for i in range(self.seed_data.shape[1])]
         self.n = self.ns[-1]
         self.observation_space = spaces.Box(
             low=np.zeros_like(self.n), high=np.full_like(self.n, fill_value=np.inf), shape=self.n.shape,
@@ -81,7 +90,7 @@ class GardEnv(gymnasium.Env):
         self.i = 0
         self.t = 0
         self.ns.clear()
-        self.ns = [n for n in self.seed_data]
+        self.ns = [self.seed_data[:, i] for i in range(self.seed_data.shape[1])]
         self.n = self.ns[-1]
         return self._get_obs(), {}
 
@@ -98,23 +107,74 @@ class GardEnv(gymnasium.Env):
         self._decode_action(action=action)
         # Apply updates, allowing both positive and negative fluxes
         self.ns.append(self.n.copy())
-        data = preprocess_data(data=np.array(self.ns).T)
+        data = preprocess_data(data=np.array(self.ns))
         info = compute_sim_info(data=data)
         reward = np.nanmedian(info["emergence"])
-        self.i += 1
-        n_mol = self.n.sum()
-        if n_mol >= self.Nmax or n_mol == 0 or self.i >= self.max_steps:
-            daughter1 = np.random.binomial(self.n, 0.5)
-            daughter2 = self.n - daughter1
-            self.n = daughter1 if np.random.rand() < 0.5 else daughter2
-            self.i = 0
-            self.t += 1
-        print(self.t)
-        return self._get_obs(), reward, self.t >= self.gen, False, {}
+        # self.i += 1
+        # n_mol = self.n.sum()
+        # if n_mol >= self.Nmax or n_mol == 0 or self.i >= self.max_steps:
+        #     daughter1 = np.random.binomial(self.n, 0.5)
+        #     daughter2 = self.n - daughter1
+        #     self.n = daughter1 if np.random.rand() < 0.5 else daughter2
+        #     self.i = 0
+        #     self.t += 1
+        # print(self.t)
+        n = self.ns.pop(-1)
+        self.n = self.ns[-1].copy()
+        return n, reward, self.t >= self.gen, False, {}
+
+    def step_long(self, a=None):
+        if a is not None:
+            self._decode_action(action=a)
+        n, ns = gard_generation(n=self.n,
+                                beta=self.beta,
+                                Nmax=self.Nmax,
+                                kf=self.kf,
+                                kb=self.kb,
+                                rho=self.rho,
+                                max_steps=self.max_steps)
+        self.ns.extend(ns)
+        self.ns.append(n.copy())
+        self.n = n
+        self.i += len(ns)
+        self.t += 1
+
+
+def get_reward(args):
+    d1, a, beta, kf, kb, rho = args
+    _, d2 = gard_generation(n=d1[:, -1],
+                            beta=beta,
+                            Nmax=NMAX,
+                            kf=kf,
+                            kb=kb,
+                            rho=rho,
+                            max_steps=10_000)
+    d = np.hstack([d1, np.array(d2).T])
+    data = preprocess_data(data=d)
+    try:
+        inf = compute_sim_info(data=data)
+    except:
+        inf = compute_sim_info(data=data)
+        print(np.sum(np.isinf(data)), np.sum(np.isnan(data)))
+        raise
+    # print(a)
+    return np.nanmedian(inf["emergence"]), a
+
+
+def decode_action(env, a):
+    idx = a // 2
+    n = env.n.copy()
+    if a % 2 == 0:
+        n[idx] += 1
+    else:
+        if n[idx] > 0:
+            n[idx] -= 1
+    return np.array(env.ns + [n]).T
 
 
 class GreedyAgent(object):
-    def __init__(self, n_action_samples=1):
+    def __init__(self, n_workers=1, n_action_samples=1):
+        self.n_workers = n_workers
         self.n_action_samples = n_action_samples
 
     def valid_actions(self, env):
@@ -127,162 +187,60 @@ class GreedyAgent(object):
             actions.append(add_action)
 
             # remove only if there is something to remove
-            if env.n[idx] > 0:
+            if env.n[idx] > 0 and np.sum(env.n) > 1:
                 actions.append(remove_action)
 
         return actions
 
-    def evaluate_action(self, env, action):
-        # one-step lookahead on a copy
-        env_copy = copy.deepcopy(env)
-        _, reward, terminated, truncated, _ = env_copy.step(action)
-        return reward
+    def evaluate_actions(self, env, actions):
+        with Pool(self.n_workers) as pool:
+            results = pool.map(get_reward,
+                               [(decode_action(env=env, a=a).copy(), a, env.beta.copy(), env.kf, env.kb, env.rho) for a
+                                in actions])
+        return results
 
-    def act(self, env):
+    def act(self, env, exp):
         actions = self.valid_actions(env)
-
-        best_action = None
-        best_reward = -np.inf
-
-        for action in actions:
-            reward = self.evaluate_action(env, action)
-            if reward > best_reward:
-                best_reward = reward
-                best_action = action
-
-        return best_action, best_reward
-
-
-class BeamSearchAgent:
-    def __init__(self, beam_width=5, depth=2, stochastic_samples=3, discount=0.95):
-        self.beam_width = beam_width
-        self.depth = depth
-        self.stochastic_samples = stochastic_samples
-        self.discount = discount
-
-    def evaluate_transition(self, env, action):
-        """
-        Apply one action from the current env state and return:
-        - mean reward over stochastic rollouts
-        - resulting state snapshot
-        - whether episode ended
-        """
-        root_state = env.get_state()
-        rewards = []
-        next_states = []
-        dones = []
-
-        for _ in range(self.stochastic_samples):
-            env.set_state(root_state)
-            _, reward, terminated, truncated, _ = env.step(action)
-            rewards.append(reward)
-            next_states.append(env.get_state())
-            dones.append(terminated or truncated)
-
-        env.set_state(root_state)
-
-        mean_reward = float(np.mean(rewards))
-        # pick one representative next state
-        rep_state = next_states[int(np.argmax(rewards))]
-        done = bool(np.any(dones))
-        return mean_reward, rep_state, done
-
-    def act(self, env):
-        initial_state = env.get_state()
-
-        # Each beam item is:
-        # {
-        #   "state": saved env state,
-        #   "actions": list of actions taken,
-        #   "score": cumulative discounted reward,
-        #   "done": bool
-        # }
-        beam = [{
-            "state": initial_state,
-            "actions": [],
-            "score": 0.0,
-            "done": False,
-        }]
-
-        for d in range(self.depth):
-            candidates = []
-
-            for item in beam:
-                if item["done"]:
-                    candidates.append(item)
-                    continue
-
-                env.set_state(item["state"])
-                actions = env.valid_actions()
-
-                for action in actions:
-                    reward, next_state, done = self.evaluate_transition(env, action)
-                    score = item["score"] + (self.discount ** d) * reward
-
-                    candidates.append({
-                        "state": next_state,
-                        "actions": item["actions"] + [action],
-                        "score": score,
-                        "done": done,
-                    })
-
-            if not candidates:
-                break
-
-            candidates.sort(key=lambda x: x["score"], reverse=True)
-            beam = candidates[:self.beam_width]
-
-        env.set_state(initial_state)
-
-        best = max(beam, key=lambda x: x["score"])
-        first_action = best["actions"][0] if best["actions"] else env.valid_actions()[0]
-        return first_action, best
+        results = self.evaluate_actions(env=env, actions=actions)
+        if exp == "max":
+            best_idx = np.argmax([x[0] for x in results])
+        else:
+            best_idx = np.argmin([x[0] for x in results])
+        return results[best_idx][1], results[best_idx][0]
 
 
 if __name__ == "__main__":
     args = parse_args()
+    set_seed(args.seed)
     env = GardEnv(generations=100,
                   seed=args.seed,
-                  p=args.p)
+                  p=args.p,
+                  kf=args.kf,
+                  kb=args.kb,
+                  Nmax=args.nmax)
 
-    # model = DQN(
-    #     "MlpPolicy",
-    #     env,
-    #     verbose=1
-    # )
-
-    # model.learn(total_timesteps=1_000_000)
-    # exit()
-    agent = BeamSearchAgent()
-    file_name = os.path.join("causality", f"{args.seed}.txt")
-    with open(file_name) as file:
-        file.write(";".join(["gen", "step", "n_sum", "phi", "comp"]) + "\n")
+    agent = GreedyAgent(n_workers=args.n_workers)
+    file_name = os.path.join("causality", ".".join([str(args.seed), str(args.p).replace('.', ','),
+                                                    str(args.kf).replace('.', ','), str(args.kb).replace('.', ','), str(args.nmax),
+                                                    args.exp, "txt"]))
+    with open(file_name, "w") as file:
+        file.write(";".join(["gen", "step", "elapsed.sec", "n_sum", "phi"]) + "\n")
 
     obs, info = env.reset()
+    start = time.time()
 
-    done = False
-    trajectory = []
-
-    while not done:
-        action, predicted_reward = agent.act(env)
-        obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        print(env.i, env.t)
-        # trajectory.append({
-        #     "action": action,
-        #     "reward": reward,
-        #     "predicted_reward": predicted_reward,
-        #     "n_sum": env.n.sum(),
-        #     "generation": env.t,
-        # })
-        # trajectory.append({
-        #     "action": action,
-        #     "reward": reward,
-        #     "planned_score": plan["score"],
-        #     "planned_actions": plan["actions"],
-        #     "generation": env.t,
-        #     "n_total": env.n.sum(),
-        # })
-        with open(file_name) as file:
-            file.write(";".join([str(env.t), str(env.i), str(env.n.sum()), str(reward),
-                                 "/".join([str(e) for e in env.n])]) + "\n")
+    while env.t < args.n_gen and env.n.sum() > 0:
+        if args.exp == "base":
+            predicted_reward = float(get_reward((np.array(env.ns).T, None, env.beta.copy(), env.kf, env.kb, env.rho))[0])
+            env.step_long(a=None)
+        else:
+            action, predicted_reward = agent.act(env, exp=args.exp)
+            env.step_long(a=action)
+        with open(file_name, "a") as file:
+            file.write(";".join([str(env.t), str(env.i), str(time.time() - start), str(env.n.sum()),
+                                 str(predicted_reward)]) + "\n")
+    savemat(
+        file_name.replace("causality", os.path.join("causality", "traces")).replace(".txt", ".mat"),
+        {"history":
+            np.array(
+                env.ns)})
