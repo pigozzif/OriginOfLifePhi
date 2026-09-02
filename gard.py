@@ -1,10 +1,11 @@
 import os
+import random
 import time
 
 import numpy as np
 from matplotlib import pyplot as plt
 
-from utils import set_seed, parse_args
+from utils import parse_args, set_seed
 
 
 def seed_population(ng, ntot, nmin):
@@ -17,63 +18,99 @@ def seed_population(ng, ntot, nmin):
 
 
 def gard_step(n, Nmax, kf, kb, rho, beta, dt):
+    # n_mol = n.sum()
+    # if n_mol >= Nmax or n_mol == 0:
+    #     return n, False
+    # kinetic flux for each molecule type
+    # frac = n / max(n_mol, 1)
+    # stochastic update (Poisson sampling)
+    # join = np.random.poisson((kf * rho * n_mol) * (1 + beta.dot(frac)) * dt)
+    # leave = np.random.poisson((kb * n) * (1 + beta.dot(frac)) * dt)
+    # n = np.clip(n + join - leave, 0, None)
+    # return n, True
+    n = n.copy()
     n_mol = n.sum()
+
     if n_mol >= Nmax or n_mol == 0:
         return n, False
-    # kinetic flux for each molecule type
-    frac = n / max(n_mol, 1)
-    # stochastic update (Poisson sampling)
-    join = np.random.poisson((kf * rho * n_mol) * (1 + beta.dot(frac)) * dt)
-    leave = np.random.poisson((kb * n) * (1 + beta.dot(frac)) * dt)
-    n = np.clip(n + join - leave, 0, None)
+
+    bn = 1 + (beta @ n) / n_mol
+
+    join_rates = kf * rho * n_mol * bn
+    leave_rates = kb * n * bn
+
+    rates = np.concatenate([join_rates, leave_rates])
+    rates = np.maximum(rates, 0)
+
+    total = rates.sum()
+    if total <= 0:
+        return n, False
+
+    mu = np.random.choice(len(rates), p=rates / total)
+
+    NG = len(n)
+
+    if mu < NG:
+        n[mu] += 1
+    else:
+        i = mu - NG
+        if n[i] > 0:
+            n[i] -= 1
+        else:
+            return n, True
+
     return n, True
 
 
 def gard_generation(
         n,
         beta,
-        NG,
-        ntot,
         Nmax,
         kf,
         kb,
         rho,
         dt=0.05,
-        max_steps=1_000
+        max_steps=100
 ):
     """
-        One GARD growth cycle using Poisson-process dynamics
-        (after Segrè et al. 2000, Eq. 4), until reaching Nmax molecules,
-        then fissioning into two daughters of size Nmax/2.
+    One GARD growth-fission generation using elementary stochastic events.
 
-        Parameters
-        ----------
-        n : ndarray
-            Initial molecule counts (shape NG)
-        beta : ndarray
-            Catalytic matrix (shape NG×NG)
-        NG : int
-            Number of molecular species
-        Nmax : int
-            Maximum assembly size before fission
-        kf, kb : float
-            Joining / leaving rate constants
-        rho : ndarray
-            Environmental abundances (shape NG)
-        dt : float
-            Poisson time step
-        max_steps : int
-            Safety cap on iterations
-        """
-    ns = [n]
+    Each molecular step changes the assembly by exactly one molecule:
+    either +1 or -1 for one molecular species. The assembly grows until it
+    reaches ``Nmax`` molecules, dies out at size 0, or hits ``max_steps``.
+    Fission is applied only if the assembly reached ``Nmax``.
+
+    ``dt`` is accepted for API compatibility but is not used by the
+    event-based update.
+    """
+    n = n.copy().astype(int)
+    ns = [n.copy()]
+
+    reached_fission_size = False
+
     for _ in range(max_steps):
-        n, ok = gard_step(n=n, Nmax=Nmax, kf=kf, kb=kb, rho=rho, beta=beta, dt=dt)
-        if not ok:
+        n_mol = n.sum()
+
+        if n_mol >= Nmax:
+            reached_fission_size = True
             break
-        # Apply updates, allowing both positive and negative fluxes
-        ns.append(n)
+
+        if n_mol == 0:
+            break
+
+        n, moved = gard_step(n, Nmax, kf, kb, rho, beta, dt=dt)
+
+        if not moved:
+            break
+
+        ns.append(n.copy())
+
+    # If the assembly died out or stalled before reaching Nmax, do not fission.
+    if not reached_fission_size and n.sum() < Nmax:
+        return n, ns
 
     # ----- fission -----
+    # Randomly partition the parent into two daughters and continue with one.
     daughter1 = np.random.binomial(n, 0.5)
     daughter2 = n - daughter1
 
@@ -90,37 +127,31 @@ def gard_multigenerational(
         A=-4,
         sigma=4
 ):
-    rho = np.ones(NG) / NG
+    """Yield successive GARD generations.
 
-    # catalytic matrix
-    # log10_beta = np.random.normal(loc=A, scale=sigma, size=(NG, NG))
-    # beta = 10 ** log10_beta
-    beta = np.random.lognormal(mean=A, sigma=sigma, size=(NG, NG))
-    # print(np.percentile(np.log10(beta), [1, 50, 99, 99.9]))
+    The catalytic matrix follows the common GARD convention
+    ``log10(beta_ij) ~ Normal(A, sigma)``. Each yielded item is
+    ``(generation_index, daughter_for_next_generation, molecular_history)``.
+    """
+    if generations < 0:
+        raise ValueError("generations must be non-negative")
 
-    # plt.imshow(beta, cmap='magma')
-    # plt.colorbar(label='log10 β')
-    # vals = beta.flatten()
-    # plt.hist(vals, bins=100)
-    # plt.show()
-    # exit()
+    rho = np.ones(NG, dtype=float) / NG
 
-    # initial seed assembly
-    n = seed_population(ng=NG,
-                        ntot=ntot,
-                        nmin=Nmax // 2)
-    print(np.sum(n))
-    exit()
+    log10_beta = np.random.normal(loc=A, scale=sigma, size=(NG, NG))
+    beta = 10.0 ** log10_beta
+
+    n = seed_population(ng=NG, ntot=ntot, nmin=Nmax // 2)
 
     for gen in range(generations):
-        n, ns = gard_generation(n, beta, NG, ntot, Nmax, kf, kb, rho)
-        yield gen, n.copy(), ns
+        n, history = gard_generation(n, beta, Nmax, kf, kb, rho)
+        yield gen, n.copy(), history
 
 
 if __name__ == "__main__":
     args = parse_args()
     set_seed(args.seed)
-    file_name = os.path.join("output", ".".join([str(args.seed), "txt"]))
+    file_name = os.path.join("ami_data/traces", ".".join([str(args.seed), "txt"]))
     # if os.path.exists(file_name):
     #     temp_data = pd.read_csv(file_name)
     #     if len(temp_data) >= args.n_gen:

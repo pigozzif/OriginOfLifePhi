@@ -18,14 +18,21 @@ DESCRIPTORS = ["std",
                "all.peaks.number",
                "all.peaks.distance.mean",
                "all.peaks.distance.std",
+               "max.peaks.time.mean",
+               "max.peaks.time.std",
                "max.peaks.val.mean",
                "max.peaks.val.std",
+               "min.peaks.time.mean",
+               "min.peaks.time.std",
                "min.peaks.val.mean",
                "min.peaks.val.std",
+               "all.peaks.time.mean",
+               "all.peaks.time.std",
                "all.peaks.val.mean",
                "all.peaks.val.std",
                "max.min.diff.mean",
                "is_flat"]
+NMAX = 10
 
 
 def parse_args():
@@ -36,8 +43,11 @@ def parse_args():
     parser.add_argument("--kb", type=float, default=1e-5)
     parser.add_argument("--A", type=float, default=-4.0)
     parser.add_argument("--sigma", type=float, default=4.0)
-    parser.add_argument("--method", type=str, default="diff")
-    parser.add_argument("--p", type=float, default=0.5)
+    parser.add_argument("--nmax", type=int, default=80)
+    parser.add_argument("--method", type=str, default="info")
+    parser.add_argument("--exp", type=str, default="min")
+    parser.add_argument("--p", type=float, default=0.0)
+    parser.add_argument("--n_workers", type=int, default=5)
     return parser.parse_args()
 
 

@@ -43,26 +43,24 @@ def preprocess_data(data, eps=1e-8):
     return data[:-1, :]
 
 
-def local_entropy_1d(idx1, x):
-    mu = x[idx1].mean()  # Central tendency
-    sigma = x[idx1].std()  # Standard deviation
-    # Magic call to scipy.
-    entropy = -np.log(norm.pdf(x[idx1], loc=mu, scale=sigma))
-    return entropy
+def local_entropy_1d(idx1, x, eps=1e-6):
+    mu = x[idx1].mean()
+    sigma = max(x[idx1].std(), eps)
+    pdf = norm.pdf(x[idx1], loc=mu, scale=sigma)
+    return -np.log(np.clip(pdf, eps, None))
 
 
 def local_entropy_nd(x, eps=1e-6):
-    # It gets grumpy if it's a 2D y with only one row
-    # so in that case, we kick it to local_entropy_1d.
     if x.shape[0] == 1:
-        return local_entropy_1d(0, x)
-    else:
-        cov = np.cov(x, ddof=0)  # The covariance matrix.
-        # cov += np.eye(cov.shape[0]) * eps
-        means = x.mean(axis=-1)  # The central tendencies
-        # Magic call to scipy.
-        entropy = -np.log(multivariate_normal.pdf(x.T, mean=means, cov=cov, allow_singular=True))
-    return entropy
+        return local_entropy_1d(0, x, eps)
+
+    cov = np.cov(x, ddof=0)
+    cov += np.eye(cov.shape[0]) * eps
+    means = x.mean(axis=-1)
+    pdf = multivariate_normal.pdf(
+        x.T, mean=means, cov=cov, allow_singular=False
+    )
+    return -np.log(np.clip(pdf, eps, None))
 
 
 def local_phi_min(idx1, idx2, atom, x, lag=1):
@@ -126,7 +124,7 @@ def local_phi_r(phi_lattice):
     # Phir is the sum of a subset of integrated information atoms
     phir = phi_lattice.nodes[(((0,),), ((0, 1),))]["pi"]
     for atom in PHIR_ATOMS:
-        phir += phi_lattice.nodes[atom]["pi"]
+        phir = phir + phi_lattice.nodes[atom]["pi"]
     return phir
 
 
